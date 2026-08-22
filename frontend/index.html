@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RESQ-AI</title>
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body>
+    <div class="hud-shell">
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">SYSTEM STATUS</div>
+          <h1>RESQ-AI</h1>
+        </div>
+        <div class="status-cluster">
+          <span class="pill cyan">ACTIVE INCIDENTS <strong id="incident-count">0</strong></span>
+          <span class="pill green">MODE <strong id="system-mode">DEMO</strong></span>
+        </div>
+        <div class="status-right">
+          <div class="eyebrow">TIME</div>
+          <div id="clock">--:--:--</div>
+        </div>
+      </header>
+
+      <main class="dashboard">
+        <aside class="panel left-panel">
+          <div class="panel-header">INCIDENT NAVIGATION</div>
+          <div id="incident-list" class="stack"></div>
+        </aside>
+
+        <section class="panel center-panel">
+          <div class="panel-header">BUILDING / INCIDENT VIEW</div>
+          <div class="map-grid">
+            <div class="map-box large">
+              <div class="map-label">BUILDING MODEL</div>
+              <div class="floor-plan">
+                <div class="room room-a">Lobby</div>
+                <div class="room room-b">Auditorium</div>
+                <div class="room room-c">Lab 201</div>
+                <div class="room room-d">Stair B</div>
+                <div class="corridor">Corridor B</div>
+                <div class="exit">Exit 02</div>
+              </div>
+            </div>
+            <div class="info-grid">
+              <div class="map-box small">
+                <div class="map-label">OCCUPANCY</div>
+                <div class="metric">27 <span>people</span></div>
+                <div class="bar"><span style="width: 70%"></span></div>
+              </div>
+              <div class="map-box small">
+                <div class="map-label">HAZARDS</div>
+                <div class="metric warning">3 <span>active</span></div>
+              </div>
+              <div class="map-box small">
+                <div class="map-label">RESOURCES</div>
+                <div class="metric safe">6 <span>available</span></div>
+              </div>
+              <div class="map-box small">
+                <div class="map-label">ROUTES</div>
+                <div class="metric">2 <span>risk</span></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <aside class="panel right-panel">
+          <div class="panel-header">AI AGENT COMMAND PANEL</div>
+          <div id="agent-panel" class="agent-stack"></div>
+        </aside>
+      </main>
+
+      <footer class="bottom-panel panel">
+        <div class="panel-header">TIMELINE / SYSTEM EVENTS</div>
+        <div id="timeline" class="timeline"></div>
+      </footer>
+    </div>
+
+    <script src="js/dashboard.js"></script>
+  </body>
+</html>

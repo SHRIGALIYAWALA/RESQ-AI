@@ -1,0 +1,26 @@
+{
+  "name": "RESQ Demo Building",
+  "address": "123 Demo Street",
+  "description": "Simulation-ready building for emergency response demonstration.",
+  "floors": [
+    {"number": 1, "name": "Floor 1"},
+    {"number": 2, "name": "Floor 2"},
+    {"number": 3, "name": "Floor 3"}
+  ],
+  "rooms": [
+    {"name": "Lobby", "floor_number": 1, "zone": "entrance", "occupancy": 12, "capacity": 25},
+    {"name": "Auditorium", "floor_number": 1, "zone": "assembly", "occupancy": 18, "capacity": 60},
+    {"name": "Lab 201", "floor_number": 2, "zone": "research", "occupancy": 9, "capacity": 20},
+    {"name": "Corridor B", "floor_number": 2, "zone": "internal", "occupancy": 6, "capacity": 20},
+    {"name": "Staircase B", "floor_number": 2, "zone": "egress", "occupancy": 0, "capacity": 10}
+  ],
+  "routes": [
+    {"name": "Route A", "origin": "Lobby", "destination": "Exit 02", "distance_m": 28.5, "estimated_time_s": 35, "risk": 0.12, "status": "available", "accessibility": "standard"},
+    {"name": "Route B", "origin": "Lab 201", "destination": "Staircase B", "distance_m": 19.3, "estimated_time_s": 22, "risk": 0.23, "status": "available", "accessibility": "standard"}
+  ],
+  "resources": [
+    {"name": "Fire Extinguisher A", "resource_type": "fire_extinguisher", "status": "available", "location": "Floor 2 Corridor B"},
+    {"name": "First Aid Kit 1", "resource_type": "first_aid", "status": "available", "location": "Lobby"},
+    {"name": "Ambulance Unit 04", "resource_type": "ambulance", "status": "available", "location": "Main gate"}
+  ]
+}
