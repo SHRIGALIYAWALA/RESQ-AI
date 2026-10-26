@@ -25,6 +25,6 @@ class PlannerAgent:
                 "decision_consideration",
             ],
             "decision_factors": ["severity", "hazard type", "occupancy", "available exits"],
-            "uncertainty": "Simulation only; operational decisions remain with the human responder.",
+            "uncertainty": "Operational decisions remain with the human responder.",
         }
         return summary

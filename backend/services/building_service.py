@@ -25,6 +25,7 @@ def create_building(db: Session, payload: Dict[str, Any]) -> Building:
     building = Building(
         name=payload["name"],
         address=payload["address"],
+        tenant_id=payload.get("tenant_id", "demo"),
         description=payload.get("description", ""),
         active=True,
         digital_model_status="draft",

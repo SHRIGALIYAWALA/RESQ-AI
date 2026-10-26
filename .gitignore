@@ -1,0 +1,16 @@
+.env
+.env.*
+!.env.example
+!secrets.env.example
+.venv/
+__pycache__/
+.pytest_cache/
+*.pyc
+uploads/
+resq_ai.db
+backups/
+deploy/certs/*.pem
+*.log
+frontend-next/node_modules/
+frontend-next/.next/
+yolo11n.pt

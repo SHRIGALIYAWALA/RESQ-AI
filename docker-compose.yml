@@ -1,0 +1,75 @@
+services:
+  postgres:
+    image: postgis/postgis:16-3.4-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-resq_ai}
+      POSTGRES_USER: ${POSTGRES_USER:-resq}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-resq_dev_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+
+  ollama-init:
+    image: ollama/ollama:latest
+    depends_on:
+      - ollama
+    restart: "no"
+    entrypoint: ["/bin/sh", "-c", "sleep 5 && ollama pull llama3.2:1b || true"]
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+
+  backend:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      APP_ENV: demo
+      REQUIRE_AUTH: "false"
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-resq}:${POSTGRES_PASSWORD:-resq_dev_password}@postgres:5432/${POSTGRES_DB:-resq_ai}
+      OLLAMA_URL: http://ollama:11434
+      OLLAMA_MODEL: llama3.2:1b
+      LLM_PROVIDER: ollama
+      VISION_PROVIDER: yolo
+      CORS_ORIGINS: http://localhost:3000,http://localhost:8000,http://127.0.0.1:3000,http://127.0.0.1:8000
+    volumes:
+      - ./uploads:/app/uploads
+      - ./yolo11n.pt:/app/yolo11n.pt
+    depends_on:
+      postgres:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+
+  frontend:
+    image: node:20-alpine
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    ports:
+      - "3000:3000"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXT_PUBLIC_WS_URL: ws://localhost:8000
+    volumes:
+      - ./frontend-next:/app
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  ollama_data:

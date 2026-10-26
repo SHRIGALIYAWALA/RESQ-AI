@@ -1,0 +1,116 @@
+[
+  {
+    "id": "SOP-FIRE-01",
+    "hazard_type": "fire",
+    "title": "Standard Commercial Structure Fire Evacuation",
+    "severity": "critical",
+    "key_actions": [
+      "Activate manual pull alarm immediately if not triggered.",
+      "Direct occupants away from primary fire origin and smoke-filled corridors.",
+      "Use stairwells only; do NOT use elevators under any circumstance.",
+      "Check doors for heat with back of hand before opening.",
+      "Stay low under smoke layer where breathable air is coolest.",
+      "Congregate at designated Exterior Assembly Points."
+    ],
+    "responder_guidance": "Connect to exterior standpipe; isolate ventilation system to prevent smoke spread across HVAC zones.",
+    "medical_priority": "Immediate airway check for smoke inhalation; burn triage."
+  },
+  {
+    "id": "SOP-MED-01",
+    "hazard_type": "medical",
+    "title": "START Mass Casualty Triage and AED Protocol",
+    "severity": "high",
+    "key_actions": [
+      "Perform Simple Triage and Rapid Treatment (START) assessment.",
+      "Categorize: RED (Immediate - respiratory rate >30 or no radial pulse), YELLOW (Delayed - serious non-life-threatening), GREEN (Minor / walking wounded), BLACK (Expectant).",
+      "Deploy nearest Automated External Defibrillator (AED) for cardiac arrest.",
+      "Clear direct stretcher path to secondary medical staging area."
+    ],
+    "responder_guidance": "Establish triage funnel at ground floor lobby; coordinate ambulance staging.",
+    "medical_priority": "Control catastrophic hemorrhage; open airways."
+  },
+  {
+    "id": "SOP-HAZMAT-01",
+    "hazard_type": "hazmat",
+    "title": "Chemical Spill and Toxic Vapor Release Protocol",
+    "severity": "critical",
+    "key_actions": [
+      "Isolate affected room/laboratory zone immediately; seal threshold.",
+      "Evacuate upwind and uphill from the chemical source.",
+      "Do NOT use water on unknown reactive chemical compounds.",
+      "Shut off local HVAC exhaust dampers."
+    ],
+    "responder_guidance": "Deploy Level B/A protective equipment before entry; consult Safety Data Sheet (SDS).",
+    "medical_priority": "Decontamination prior to transport; oxygen therapy for toxic inhalation."
+  },
+  {
+    "id": "SOP-CROWD-01",
+    "hazard_type": "crowd_congestion",
+    "title": "High-Density Bottleneck and Crowd Crush Prevention",
+    "severity": "medium",
+    "key_actions": [
+      "Divert occupant streams to secondary emergency exits to balance corridor load.",
+      "Keep announcement cadence calm, clear, and directional.",
+      "Station wardens at bottleneck pinch points to maintain steady throughput.",
+      "Ensure all double-doors are pinned in open position."
+    ],
+    "responder_guidance": "Establish unidirectional flow corridors; relieve pressure at exterior egress gates.",
+    "medical_priority": "Monitor for compressive asphyxia and syncopal episodes."
+  },
+  {
+    "id": "SOP-FLOOD-01",
+    "hazard_type": "flood",
+    "title": "Interior Flooding and Water Ingress Evacuation",
+    "severity": "high",
+    "key_actions": [
+      "Move occupants to upper floors away from water ingress points.",
+      "Shut off electrical panels in affected zones if safe to do so.",
+      "Avoid basement stairwells and submerged corridors.",
+      "Deploy sandbags at entry points if authorized by building operator."
+    ],
+    "responder_guidance": "Coordinate pump deployment; monitor structural load on lower floors.",
+    "medical_priority": "Hypothermia and slip/fall injuries near wet surfaces."
+  },
+  {
+    "id": "SOP-EQ-01",
+    "hazard_type": "earthquake",
+    "title": "Earthquake Drop-Cover-Hold and Post-Shake Evacuation",
+    "severity": "critical",
+    "key_actions": [
+      "Drop, cover, and hold on during shaking.",
+      "After shaking stops, evacuate using stairs; check for gas leaks and structural cracks.",
+      "Do not re-enter until authorized structural assessment.",
+      "Account for occupants at exterior assembly points."
+    ],
+    "responder_guidance": "Rapid structural triage; isolate utilities if damage suspected.",
+    "medical_priority": "Crush injuries and trauma triage at assembly points."
+  },
+  {
+    "id": "SOP-BLOCK-01",
+    "hazard_type": "blocked_path",
+    "title": "Corridor Blockage and Alternate Egress Routing",
+    "severity": "medium",
+    "key_actions": [
+      "Identify blocked corridor segments and redirect occupants to alternate exits.",
+      "Update digital twin danger zones to reflect blocked paths.",
+      "Station wardens at decision points to prevent entry into blocked routes.",
+      "Verify accessibility routes remain open for mobility-impaired occupants."
+    ],
+    "responder_guidance": "Clear debris only when safe; prioritize alternate exit capacity.",
+    "medical_priority": "Monitor for panic-related medical events."
+  },
+  {
+    "id": "SOP-EVAC-01",
+    "hazard_type": "evacuation",
+    "title": "Building-Wide Evacuation Drill and Live Emergency Protocol",
+    "severity": "high",
+    "key_actions": [
+      "Activate building-wide alert through authorized announcement system.",
+      "Direct each zone to assigned primary or secondary exit per evacuation plan.",
+      "Conduct roll call at assembly points.",
+      "Log all deviations and blocked routes for after-action review."
+    ],
+    "responder_guidance": "Maintain command post communication; update routes dynamically.",
+    "medical_priority": "First aid for minor injuries during egress."
+  }
+]

@@ -1,3 +1,58 @@
+ .workflow-shell {
+  min-height: 100vh;
+  padding: 24px;
+}
+
+.workflow-panel {
+  max-width: 920px;
+  margin: 24px auto;
+  padding: 24px;
+}
+
+.workflow-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.workflow-form label {
+  display: grid;
+  gap: 8px;
+  color: var(--text-muted, #9fb8c7);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.workflow-form textarea,
+.workflow-form label:first-child,
+.workflow-form label:nth-child(3),
+.workflow-form button {
+  grid-column: 1 / -1;
+}
+
+.workflow-form input,
+.workflow-form textarea,
+.workflow-form select {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px;
+  color: inherit;
+  background: rgba(3, 15, 22, 0.8);
+  border: 1px solid rgba(125, 205, 224, 0.35);
+  border-radius: 4px;
+}
+
+.workflow-form textarea { min-height: 90px; resize: vertical; }
+.workflow-status { color: #9fb8c7; line-height: 1.5; }
+#result-json { overflow: auto; white-space: pre-wrap; color: #b8f5dc; }
+
+@media (max-width: 680px) {
+  .workflow-shell { padding: 12px; }
+  .workflow-form { grid-template-columns: 1fr; }
+  .workflow-form label,
+  .workflow-form button { grid-column: 1; }
+}
 :root {
   --bg: #07131d;
   --bg-2: #0d1d2d;
@@ -16,6 +71,52 @@
 
 * {
   box-sizing: border-box;
+}
+
+button {
+  font: inherit;
+}
+
+.operator-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  grid-column: 1 / -1;
+}
+
+.operator-actions button,
+.workflow-form button {
+  padding: 10px 14px;
+  color: var(--text);
+  background: rgba(15, 54, 72, 0.9);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  cursor: pointer;
+  letter-spacing: 0.06em;
+  font-size: 0.72rem;
+}
+
+.operator-actions button:hover,
+.workflow-form button:hover,
+.incident-card:hover {
+  border-color: var(--cyan);
+  box-shadow: 0 0 16px rgba(90, 229, 255, 0.18);
+}
+
+.hidden {
+  display: none;
+}
+
+.incident-card {
+  width: 100%;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.empty-state {
+  padding: 18px 8px;
+  color: var(--muted);
 }
 
 body {

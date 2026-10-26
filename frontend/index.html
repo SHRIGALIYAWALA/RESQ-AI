@@ -1,82 +1,98 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>RESQ-AI</title>
-    <link rel="stylesheet" href="css/styles.css" />
-  </head>
-  <body>
-    <div class="hud-shell">
-      <header class="topbar">
-        <div>
-          <div class="eyebrow">SYSTEM STATUS</div>
-          <h1>RESQ-AI</h1>
-        </div>
-        <div class="status-cluster">
-          <span class="pill cyan">ACTIVE INCIDENTS <strong id="incident-count">0</strong></span>
-          <span class="pill green">MODE <strong id="system-mode">DEMO</strong></span>
-        </div>
-        <div class="status-right">
-          <div class="eyebrow">TIME</div>
-          <div id="clock">--:--:--</div>
-        </div>
-      </header>
-
-      <main class="dashboard">
-        <aside class="panel left-panel">
-          <div class="panel-header">INCIDENT NAVIGATION</div>
-          <div id="incident-list" class="stack"></div>
-        </aside>
-
-        <section class="panel center-panel">
-          <div class="panel-header">BUILDING / INCIDENT VIEW</div>
-          <div class="map-grid">
-            <div class="map-box large">
-              <div class="map-label">BUILDING MODEL</div>
-              <div class="floor-plan">
-                <div class="room room-a">Lobby</div>
-                <div class="room room-b">Auditorium</div>
-                <div class="room room-c">Lab 201</div>
-                <div class="room room-d">Stair B</div>
-                <div class="corridor">Corridor B</div>
-                <div class="exit">Exit 02</div>
-              </div>
-            </div>
-            <div class="info-grid">
-              <div class="map-box small">
-                <div class="map-label">OCCUPANCY</div>
-                <div class="metric">27 <span>people</span></div>
-                <div class="bar"><span style="width: 70%"></span></div>
-              </div>
-              <div class="map-box small">
-                <div class="map-label">HAZARDS</div>
-                <div class="metric warning">3 <span>active</span></div>
-              </div>
-              <div class="map-box small">
-                <div class="map-label">RESOURCES</div>
-                <div class="metric safe">6 <span>available</span></div>
-              </div>
-              <div class="map-box small">
-                <div class="map-label">ROUTES</div>
-                <div class="metric">2 <span>risk</span></div>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <aside class="panel right-panel">
-          <div class="panel-header">AI AGENT COMMAND PANEL</div>
-          <div id="agent-panel" class="agent-stack"></div>
-        </aside>
-      </main>
-
-      <footer class="bottom-panel panel">
-        <div class="panel-header">TIMELINE / SYSTEM EVENTS</div>
-        <div id="timeline" class="timeline"></div>
-      </footer>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RESQ-AI // Command Center</title>
+  <link rel="stylesheet" href="/css/sci-fi-theme.css">
+</head>
+<body>
+  <!-- Header Bar -->
+  <header class="header-bar">
+    <div class="brand-title">
+      <span>🚨 RESQ-AI</span>
+      <span class="brand-badge">MULTIMODAL INTELLIGENCE CORE</span>
     </div>
+    <nav class="nav-links">
+      <a href="/" class="nav-link active">Command Center</a>
+      <a href="/buildings" class="nav-link">Digital Twin</a>
+      <a href="/incident" class="nav-link">Report Emergency</a>
+    </nav>
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <div id="wsIndicator" class="pulse-indicator"></div>
+      <span id="wsLabel" style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--safe-green);">LIVE WS ONLINE</span>
+    </div>
+  </header>
 
-    <script src="js/dashboard.js"></script>
-  </body>
+  <!-- Main Command Grid -->
+  <main class="command-grid">
+    <!-- Left Panel: Live Incident Feed & Camera Grid -->
+    <section class="sci-panel" style="overflow-y: auto;">
+      <div class="panel-header">
+        <span class="panel-title">📡 Live Camera Grid</span>
+        <button class="btn-cyan" onclick="window.location.href='/incident'">+ Report</button>
+      </div>
+
+      <div id="cameraGrid">
+        <!-- Live Camera Feeds populated by JS -->
+      </div>
+
+      <div class="panel-header" style="margin-top: 15px;">
+        <span class="panel-title">🚨 Active Incidents</span>
+      </div>
+      <div id="incidentList">
+        <!-- Incidents List populated by JS -->
+      </div>
+    </section>
+
+    <!-- Center Panel: Building Digital Twin & Evacuation Route Canvas -->
+    <section class="sci-panel">
+      <div class="panel-header">
+        <span class="panel-title">🏢 Building Digital Twin // Evacuation Flow</span>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn-cyan floor-btn active" data-floor="1">F1</button>
+          <button class="btn-cyan floor-btn" data-floor="2">F2</button>
+        </div>
+      </div>
+
+      <div class="twin-container">
+        <canvas id="twinCanvas"></canvas>
+      </div>
+
+      <div style="margin-top: 12px; display: flex; justify-content: space-between; font-size: 0.8rem; font-family: var(--font-mono);">
+        <span style="color: var(--safe-green);">● GREEN: Clear / Safe Route</span>
+        <span style="color: var(--warning-amber);">● AMBER: Caution / Congestion</span>
+        <span style="color: var(--danger-red);">● RED: Active Hazard / Blocked</span>
+      </div>
+
+      <!-- Multilingual Announcement Section -->
+      <div id="announcementSection">
+        <!-- Audio Announcement Bar populated by JS -->
+      </div>
+
+      <div id="reviewSection" style="margin-top: 12px;">
+        <!-- Incident review controls populated by JS -->
+      </div>
+    </section>
+
+    <!-- Right Panel: Multi-Agent Intelligence HUD -->
+    <section class="sci-panel" style="overflow-y: auto;">
+      <div class="panel-header">
+        <span class="panel-title">🤖 Multi-Agent Intelligence HUD</span>
+      </div>
+
+      <div id="agentStream">
+        <!-- Agent Cards populated by JS -->
+        <div style="padding: 20px; color: var(--text-muted); font-size: 0.85rem;">
+          Select an incident to view real-time multi-agent reasoning, deterministic routing, and triage.
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Scripts -->
+  <script src="/js/websocket_client.js"></script>
+  <script src="/js/digital_twin.js"></script>
+  <script src="/js/command_center.js"></script>
+</body>
 </html>

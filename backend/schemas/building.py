@@ -116,6 +116,8 @@ class BuildingCreate(BaseModel):
     name: str = Field(..., min_length=2)
     address: str = Field(..., min_length=2)
     description: str = ""
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
     floors: List[FloorInput] = []
     rooms: List[RoomInput] = []
     corridors: List[CorridorInput] = []

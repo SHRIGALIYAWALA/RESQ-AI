@@ -1,202 +1,174 @@
+import asyncio
+import logging
+import time
 from typing import Any, Dict, List, Optional
 
-from backend.agents.planner_agent import PlannerAgent
-from backend.agents.triage_agent import TriageAgent
+from backend.agents.incident_agent import IncidentAgent
+from backend.agents.vision_agent import VisionAgent
+from backend.agents.building_agent import BuildingAgent
+from backend.agents.evacuation_agent import EvacuationAgent
+from backend.agents.medical_agent import MedicalAgent
+from backend.agents.resource_agent import ResourceAgent
+from backend.agents.route_agent import RouteAgent
+from backend.agents.communication_agent import CommunicationAgent
+from backend.building.room_graph import BuildingGraphModel
+from backend.building.evacuation_graph import build_graph_from_dict
+from backend.vision.stream_manager import stream_manager
+
+logger = logging.getLogger("resq_ai.intelligence.core")
 
 
 class EmergencyIntelligenceCore:
+    """Master Multi-Agent Orchestrator for RESQ-AI.
+    Coordinates real-time computer vision streams, building spatial digital twin, deterministic evacuation routing,
+    medical triage, resource allocation, and multilingual emergency communication with full audit trail.
+    """
+
     name = "EMERGENCY_INTELLIGENCE_CORE"
 
-    def __init__(self) -> None:
-        self.planner = PlannerAgent()
-        self.triage = TriageAgent()
+    def __init__(self):
+        self.incident_agent = IncidentAgent()
+        self.vision_agent = VisionAgent()
+        self.building_agent = BuildingAgent()
+        self.evacuation_agent = EvacuationAgent()
+        self.medical_agent = MedicalAgent()
+        self.resource_agent = ResourceAgent()
+        self.route_agent = RouteAgent()
+        self.communication_agent = CommunicationAgent()
 
-    def analyze(
+    async def analyze_async(
         self,
         incident: Dict[str, Any],
         building: Optional[Dict[str, Any]] = None,
+        camera_telemetry: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
-        incident = {**incident, "incident_type": str(incident.get("incident_type", "unknown")).lower()}
-        planner = self.planner.plan(incident)
-        triage = self.triage.assess(incident)
-        hazards = self._hazard_analysis(incident)
-        people = self._people_analysis(incident, triage, building)
-        resources = self._resource_analysis(incident, building)
-        routes = self._route_analysis(incident, building)
-        safety = self._safety_analysis(incident, hazards, routes, building)
-        decision = self._decision_analysis(incident, triage, hazards, people, resources, routes, safety)
-        communication = self._communication_analysis(incident, decision)
-        memory = self._memory_record(incident, hazards, decision)
-        report = self._report(incident, decision, safety)
+        start_time = time.time()
+        title = incident.get("title", "Emergency Report")
+        description = incident.get("description", "")
+        location = incident.get("location", {})
+
+        # 1. Vision Stream Analysis
+        streams = camera_telemetry if camera_telemetry is not None else [
+            s.get("latest_analysis", {}) for s in stream_manager.get_all_streams()
+        ]
+        vision_result = self.vision_agent.analyze_streams(streams)
+
+        # 2. Incident Classification & Extraction
+        incident_result = await self.incident_agent.analyze_incident(
+            title=title,
+            description=description,
+            reported_location=location,
+            multimodal_findings=[h.get("type") for h in vision_result.get("active_hazards", [])],
+        )
+        classification = incident_result.get("classification", {})
+        incident_type = classification.get("incident_type", incident.get("incident_type", "general"))
+        severity = classification.get("severity", incident.get("severity", "medium"))
+
+        # 3. Building Digital Twin Assessment
+        graph_model: BuildingGraphModel
+        if isinstance(building, BuildingGraphModel):
+            graph_model = building
+        elif building and isinstance(building, dict):
+            graph_model = build_graph_from_dict(building)
+        else:
+            # Fallback building layout with 2 floors, 4 rooms, 2 exits
+            default_dict = {
+                "rooms": [
+                    {"name": "Room 101", "floor_number": 1, "capacity": 20, "occupancy": 5},
+                    {"name": "Room 102", "floor_number": 1, "capacity": 25, "occupancy": 8},
+                    {"name": "Room 201", "floor_number": 2, "capacity": 15, "occupancy": 3},
+                    {"name": "Room 202", "floor_number": 2, "capacity": 20, "occupancy": 12},
+                ],
+                "corridors": [
+                    {"name": "Corridor Ground", "floor_number": 1},
+                    {"name": "Corridor Floor 2", "floor_number": 2},
+                ],
+                "exits": [
+                    {"name": "Emergency Exit A", "floor_number": 1, "location": "North Wing"},
+                    {"name": "Emergency Exit B", "floor_number": 1, "location": "South Wing"},
+                ],
+            }
+            graph_model = build_graph_from_dict(default_dict)
+
+        building_result = self.building_agent.assess_building(graph_model)
+
+        # Combine incident hazards with camera hazards
+        active_hazards = list(vision_result.get("active_hazards", []))
+        if not active_hazards:
+            for hz in classification.get("immediate_hazards", [incident_type]):
+                active_hazards.append({
+                    "type": hz,
+                    "location": str(location.get("room", location.get("zone", "Room 202"))),
+                    "severity": severity,
+                })
+
+        # 4. Safe Evacuation Planning
+        evacuation_result = self.evacuation_agent.generate_plan(graph_model, active_hazards)
+
+        # 5. Medical Triage
+        medical_result = await self.medical_agent.triage_incident(
+            incident_type=incident_type,
+            description=description,
+            reported_casualties=vision_result.get("total_people_detected", 0) if incident_type == "medical" else 0,
+        )
+
+        # 6. Resource & Responder Allocation
+        resource_result = self.resource_agent.recommend_resources(
+            incident_type=incident_type,
+            severity=severity,
+            building_resources=(building or {}).get("resources", []) if isinstance(building, dict) else [],
+        )
+
+        # 7. Communication & Multilingual Announcements
+        communication_result = await self.communication_agent.generate_communications(
+            incident_summary={
+                "incident_type": incident_type,
+                "severity": severity,
+                "summary": classification.get("summary", title),
+            },
+            evacuation_plan=evacuation_result,
+        )
+
+        duration_ms = round((time.time() - start_time) * 1000, 1)
 
         return {
-            "agent": self.name,
+            "orchestrator": self.name,
             "status": "analysis_complete",
-            "planner": planner,
-            "triage": triage,
-            "people": people,
-            "hazards": hazards,
-            "resources": resources,
-            "routes": routes,
-            "safety": safety,
-            "decision": decision,
-            "communication": communication,
-            "memory": memory,
-            "report": report,
-            "uncertainty": "Decision-support output only; a qualified human responder must validate actions.",
+            "execution_time_ms": duration_ms,
+            "incident_classification": classification,
+            "vision_telemetry": vision_result,
+            "building_intelligence": building_result,
+            "evacuation_plan": evacuation_result,
+            "medical_triage": medical_result.get("triage", {}),
+            "resource_allocation": resource_result,
+            "communications": communication_result.get("messages", {}),
+            "announcement_approval_status": "PENDING_OPERATOR_APPROVAL",
+            "human_authorization_required": True,
+            "audit_trail": {
+                "timestamp": time.time(),
+                "agents_invoked": [
+                    "INCIDENT_AGENT",
+                    "VISION_AGENT",
+                    "BUILDING_AGENT",
+                    "EVACUATION_AGENT",
+                    "MEDICAL_AGENT",
+                    "RESOURCE_AGENT",
+                    "COMMUNICATION_AGENT",
+                ],
+                "deterministic_routing": True,
+            },
         }
 
-    def _hazard_analysis(self, incident: Dict[str, Any]) -> Dict[str, Any]:
-        incident_type = str(incident.get("incident_type", "unknown")).lower()
-        text = f"{incident.get('title', '')} {incident.get('description', '')}".lower()
-        hazard_types = [incident_type] if incident_type != "unknown" else []
-        if "smoke" in text and "smoke" not in hazard_types:
-            hazard_types.append("smoke")
-        if any(word in text for word in ("blocked", "obstacle")):
-            hazard_types.append("obstacle")
-        severity = "high" if incident_type in {"fire", "earthquake", "multi_hazard"} else incident.get("severity", "medium")
-        return {
-            "agent": "HAZARD_AGENT",
-            "status": "completed",
-            "hazards": [{"type": item, "severity": severity, "source": "incident report"} for item in hazard_types],
-            "active_hazard_count": len(hazard_types),
-            "confidence": 0.78,
-            "evidence": ["incident title", "incident description", "incident type"],
-        }
-
-    def _people_analysis(
-        self,
-        incident: Dict[str, Any],
-        triage: Dict[str, Any],
-        building: Optional[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        rooms = (building or {}).get("rooms", [])
-        occupancy = sum(room.get("occupancy", 0) or 0 for room in rooms)
-        capacity = sum(room.get("capacity", 0) or 0 for room in rooms)
-        estimated = max(triage.get("potential_injured", 0), occupancy)
-        if estimated == 0:
-            estimated = 1 if incident.get("incident_type") == "medical" else 0
-        return {
-            "agent": "PEOPLE_AGENT",
-            "status": "completed",
-            "estimated_people_at_risk": estimated,
-            "registered_capacity": capacity,
-            "potential_injured": triage.get("potential_injured", 0),
-            "assistance_priority": "high" if triage.get("high_priority_cases", 0) else "monitor",
-            "confidence": 0.68 if occupancy == 0 else 0.82,
-            "uncertainty": "Occupancy is an estimate unless confirmed by responders or authorized sensors.",
-        }
-
-    def _resource_analysis(self, incident: Dict[str, Any], building: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        resources = (building or {}).get("equipment", []) + (building or {}).get("resources", [])
-        incident_type = str(incident.get("incident_type", "")).lower()
-        relevant = []
-        for resource in resources:
-            resource_type = str(resource.get("resource_type", resource.get("equipment_type", ""))).lower()
-            if incident_type == "fire" and any(term in resource_type for term in ("extinguisher", "hose", "fire")):
-                relevant.append(resource)
-            elif incident_type == "medical" and any(term in resource_type for term in ("medical", "first", "aed")):
-                relevant.append(resource)
-        return {
-            "agent": "RESOURCE_AGENT",
-            "status": "completed",
-            "available_resources": relevant,
-            "resource_count": len(resources),
-            "recommended_resources": relevant[:5],
-            "confidence": 0.8 if building else 0.35,
-            "uncertainty": "Availability requires on-site confirmation.",
-        }
-
-    def _route_analysis(self, incident: Dict[str, Any], building: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-        routes = (building or {}).get("routes", [])
-        usable = [route for route in routes if route.get("status", "available") == "available"]
-        return {
-            "agent": "ROUTE_AGENT",
-            "status": "completed",
-            "candidate_routes": usable,
-            "route_count": len(usable),
-            "blocked_routes": [route for route in routes if route.get("status") not in (None, "available")],
-            "recommendation": "Validate the safest available route before movement." if usable else "No registered route is available; responder validation required.",
-            "confidence": 0.84 if usable else 0.25,
-        }
-
-    def _safety_analysis(
-        self,
-        incident: Dict[str, Any],
-        hazards: Dict[str, Any],
-        routes: Dict[str, Any],
-        building: Optional[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        warnings: List[str] = []
-        if hazards["active_hazard_count"]:
-            warnings.append("Keep personnel clear of reported hazard areas until verified safe.")
-        if not routes["candidate_routes"]:
-            warnings.append("Do not infer an evacuation path from incomplete building data.")
-        if not (building or {}).get("verification_status") == "verified":
-            warnings.append("Building model is not verified for operational routing.")
-        return {
-            "agent": "SAFETY_AGENT",
-            "status": "completed",
-            "risk_level": "critical" if incident.get("incident_type") == "fire" else "elevated",
-            "warnings": warnings,
-            "human_validation_required": True,
-            "confidence": 0.86,
-        }
-
-    def _decision_analysis(
-        self,
-        incident: Dict[str, Any],
-        triage: Dict[str, Any],
-        hazards: Dict[str, Any],
-        people: Dict[str, Any],
-        resources: Dict[str, Any],
-        routes: Dict[str, Any],
-        safety: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        priority = "critical" if hazards["active_hazard_count"] and triage.get("high_priority_cases") else "high"
-        return {
-            "agent": "DECISION_AGENT",
-            "status": "completed",
-            "priority": priority,
-            "recommended_next_steps": [
-                "Confirm incident details with an authorized human responder.",
-                "Account for people requiring assistance.",
-                "Validate hazards and routes on site before directing movement.",
-                "Confirm resource availability before assignment.",
-            ],
-            "inputs_considered": ["triage", "hazards", "people", "resources", "routes", "safety"],
-            "human_approval_required": True,
-            "confidence": 0.79,
-        }
-
-    def _communication_analysis(self, incident: Dict[str, Any], decision: Dict[str, Any]) -> Dict[str, Any]:
-        return {
-            "agent": "COMMUNICATION_AGENT",
-            "status": "draft",
-            "audience": "authorized responders",
-            "message": f"{decision['priority'].upper()} priority {incident.get('incident_type', 'unknown')} incident reported. Human validation required before action.",
-            "dispatch_claim": False,
-        }
-
-    def _memory_record(self, incident: Dict[str, Any], hazards: Dict[str, Any], decision: Dict[str, Any]) -> Dict[str, Any]:
-        return {
-            "agent": "MEMORY_AGENT",
-            "status": "record_ready",
-            "event_key": f"{incident.get('incident_type', 'unknown')}:{incident.get('title', 'untitled')}",
-            "facts": [
-                f"Incident type: {incident.get('incident_type', 'unknown')}",
-                f"Detected hazards: {hazards['active_hazard_count']}",
-                f"Decision priority: {decision['priority']}",
-            ],
-            "persistence": "not_written",
-        }
-
-    def _report(self, incident: Dict[str, Any], decision: Dict[str, Any], safety: Dict[str, Any]) -> Dict[str, Any]:
-        return {
-            "agent": "REPORT_AGENT",
-            "status": "draft",
-            "title": f"Emergency analysis: {incident.get('title', 'untitled')}",
-            "executive_summary": f"{decision['priority'].capitalize()} priority incident requiring human review.",
-            "safety_status": safety["risk_level"],
-            "limitations": ["No autonomous dispatch", "No verified live sensor feed", "No medical diagnosis"],
-        }
+    def analyze(self, incident: Dict[str, Any], building: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Synchronous wrapper for legacy compatibility."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # In running loop (e.g. FastAPI), run in thread pool
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(asyncio.run, self.analyze_async(incident, building))
+                    return future.result()
+            return loop.run_until_complete(self.analyze_async(incident, building))
+        except Exception:
+            return asyncio.run(self.analyze_async(incident, building))

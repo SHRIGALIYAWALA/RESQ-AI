@@ -27,6 +27,12 @@ class IncidentAnalysisResponse(BaseModel):
     status: str = "analysis_complete"
 
 
+class IncidentReviewDecision(BaseModel):
+    decision: str = Field(default="approve", description="approve, reject, or override")
+    reviewer: str = Field(default="", description="Operator or responder identity")
+    notes: str = ""
+
+
 class IncidentResponse(BaseModel):
     id: int
     building_id: Optional[int]
@@ -37,3 +43,6 @@ class IncidentResponse(BaseModel):
     severity: str
     location: Dict[str, Any]
     summary: str
+    review_status: str = "pending_review"
+    review_decision: str = ""
+    reviewed_by: str = ""

@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RESQ-AI // Digital Twin Manager</title>
+  <link rel="stylesheet" href="/css/sci-fi-theme.css">
+</head>
+<body>
+  <header class="header-bar">
+    <div class="brand-title">
+      <span>🚨 RESQ-AI</span>
+      <span class="brand-badge">DIGITAL TWIN MANAGER</span>
+    </div>
+    <nav class="nav-links">
+      <a href="/" class="nav-link">Command Center</a>
+      <a href="/buildings" class="nav-link active">Digital Twin</a>
+      <a href="/incident" class="nav-link">Report Emergency</a>
+    </nav>
+  </header>
+
+  <main style="padding: 24px; max-width: 1200px; margin: 0 auto;">
+    <div class="sci-panel" style="margin-bottom: 20px;">
+      <div class="panel-header">
+        <span class="panel-title">🏢 Registered Facilities & Spatial Layouts</span>
+        <button class="btn-cyan" onclick="document.getElementById('createModal').style.display='block'">+ Onboard Building</button>
+      </div>
+      <div id="buildingsList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;">
+        <!-- Buildings List -->
+      </div>
+    </div>
+
+    <!-- Modal for building creation -->
+    <div id="createModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.8); z-index: 200; align-items: center; justify-content: center; backdrop-filter: blur(5px);">
+      <div class="sci-panel" style="width: 500px; margin: 60px auto;">
+        <div class="panel-header">
+          <span class="panel-title">Register Building Digital Twin</span>
+          <button class="btn-cyan" onclick="document.getElementById('createModal').style.display='none'">✕</button>
+        </div>
+        <form id="buildingForm" onsubmit="window.submitBuilding(event)">
+          <div style="margin-bottom: 12px;">
+            <label style="font-size: 0.8rem; color: var(--text-muted);">Building Name</label>
+            <input type="text" id="bName" required style="width: 100%; padding: 8px; background: #000; border: 1px solid var(--border-cyan); color: #fff; border-radius: 4px;" value="Tech Innovation Hub">
+          </div>
+          <div style="margin-bottom: 12px;">
+            <label style="font-size: 0.8rem; color: var(--text-muted);">Address / Location</label>
+            <input type="text" id="bAddress" required style="width: 100%; padding: 8px; background: #000; border: 1px solid var(--border-cyan); color: #fff; border-radius: 4px;" value="104 Innovation Way">
+          </div>
+          <div style="margin-bottom: 16px;">
+            <label style="font-size: 0.8rem; color: var(--text-muted);">Floors Count</label>
+            <input type="number" id="bFloors" value="2" min="1" max="10" style="width: 100%; padding: 8px; background: #000; border: 1px solid var(--border-cyan); color: #fff; border-radius: 4px;">
+          </div>
+          <button type="submit" class="btn-cyan" style="width: 100%;">Create Digital Model</button>
+        </form>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    async function loadBuildings() {
+      const res = await fetch("/api/buildings");
+      if (res.ok) {
+        const buildings = await res.json();
+        const container = document.getElementById("buildingsList");
+        container.innerHTML = buildings.map(b => `
+          <div class="agent-card">
+            <div class="agent-name">${b.name}</div>
+            <div class="agent-thought">
+              📍 ${b.address}<br>
+              Floors: ${b.floors_count} | Rooms: ${b.rooms_count} | Status: <strong style="color: var(--safe-green);">VERIFIED</strong>
+            </div>
+            <div style="margin-top: 10px; display: flex; gap: 8px;">
+              <button class="btn-cyan" onclick="window.location.href='/'">Open in Command Center</button>
+            </div>
+          </div>
+        `).join("");
+      }
+    }
+
+    async function submitBuilding(e) {
+      e.preventDefault();
+      const payload = {
+        name: document.getElementById("bName").value,
+        address: document.getElementById("bAddress").value,
+        floors: Array.from({ length: parseInt(document.getElementById("bFloors").value) }, (_, i) => ({ number: i + 1, name: `Floor ${i + 1}` })),
+        rooms: [
+          { name: "Room 101", floor_number: 1, capacity: 20 },
+          { name: "Room 102", floor_number: 1, capacity: 25 },
+          { name: "Room 201", floor_number: 2, capacity: 15 },
+          { name: "Room 202", floor_number: 2, capacity: 20 }
+        ],
+        exits: [
+          { name: "Emergency Exit A", floor_number: 1 },
+          { name: "Emergency Exit B", floor_number: 1 }
+        ]
+      };
+
+      const res = await fetch("/api/buildings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        document.getElementById("createModal").style.display = "none";
+        loadBuildings();
+      }
+    }
+
+    loadBuildings();
+  </script>
+</body>
+</html>

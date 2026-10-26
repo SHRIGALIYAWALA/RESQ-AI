@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RESQ-AI // Report Emergency</title>
+  <link rel="stylesheet" href="/css/sci-fi-theme.css">
+</head>
+<body>
+  <header class="header-bar">
+    <div class="brand-title">
+      <span>🚨 RESQ-AI</span>
+      <span class="brand-badge">CITIZEN & RESPONDER INTAKE</span>
+    </div>
+    <nav class="nav-links">
+      <a href="/" class="nav-link">Command Center</a>
+      <a href="/buildings" class="nav-link">Digital Twin</a>
+      <a href="/incident" class="nav-link active">Report Emergency</a>
+    </nav>
+  </header>
+
+  <main style="padding: 24px; max-width: 800px; margin: 0 auto;">
+    <div class="sci-panel">
+      <div class="panel-header">
+        <span class="panel-title">🚨 Real-Time Emergency Incident Report</span>
+      </div>
+
+      <form id="incidentForm" onsubmit="window.submitIncident(event)">
+        <div style="margin-bottom: 14px;">
+          <label style="font-size: 0.85rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Incident Title</label>
+          <input type="text" id="incTitle" required style="width: 100%; padding: 10px; background: #000; border: 1px solid var(--border-cyan); color: #fff; border-radius: 4px;" placeholder="e.g. Fire observed in 2nd Floor Server Room">
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+          <div>
+            <label style="font-size: 0.85rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Incident Type</label>
+            <select id="incType" style="width: 100%; padding: 10px; background: #000; border: 1px solid var(--border-cyan); color: #fff; border-radius: 4px;">
+              <option value="fire">🔥 Fire / Flame</option>
+              <option value="smoke">💨 Smoke Inhalation</option>
+              <option value="medical">🩺 Medical Emergency / Collapse</option>
+              <option value="hazmat">☣️ Chemical / Toxic Gas</option>
+              <option value="blocked_path">🚫 Transit Corridor Blockage</option>
+            </select>
+          </div>
+
+          <div>
+            <label style="font-size: 0.85rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Severity Level</label>
+            <select id="incSeverity" style="width: 100%; padding: 10px; background: #000; border: 1px solid var(--border-cyan); color: #fff; border-radius: 4px;">
+              <option value="critical">CRITICAL (Immediate Danger to Life)</option>
+              <option value="high" selected>HIGH (Active Hazard)</option>
+              <option value="medium">MEDIUM (Controlled Hazard)</option>
+              <option value="low">LOW (Precautionary)</option>
+            </select>
+          </div>
+        </div>
+
+        <div style="margin-bottom: 14px;">
+          <label style="font-size: 0.85rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Location / Room / Floor</label>
+          <input type="text" id="incLocation" required style="width: 100%; padding: 10px; background: #000; border: 1px solid var(--border-cyan); color: #fff; border-radius: 4px;" placeholder="e.g. Floor 2, Room 202">
+        </div>
+
+        <div style="margin-bottom: 18px;">
+          <label style="font-size: 0.85rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Emergency Description & Observations</label>
+          <textarea id="incDesc" rows="4" style="width: 100%; padding: 10px; background: #000; border: 1px solid var(--border-cyan); color: #fff; border-radius: 4px;" placeholder="Describe what you see, number of people trapped, smoke density, etc."></textarea>
+        </div>
+
+        <button type="submit" class="btn-danger" style="width: 100%; padding: 12px; font-size: 1rem; font-weight: bold; letter-spacing: 1.5px;">
+          🚨 TRANSMIT EMERGENCY REPORT TO AI COMMAND CORE
+        </button>
+      </form>
+
+      <div id="submitResult" style="margin-top: 16px; display: none;"></div>
+    </div>
+  </main>
+
+  <script>
+    async function submitIncident(e) {
+      e.preventDefault();
+      const resultEl = document.getElementById("submitResult");
+      resultEl.style.display = "block";
+      resultEl.innerHTML = `<div class="agent-thought" style="color: var(--border-cyan);">Transmitting and running multi-agent intelligence analysis...</div>`;
+
+      const payload = {
+        title: document.getElementById("incTitle").value,
+        incident_type: document.getElementById("incType").value,
+        severity: document.getElementById("incSeverity").value,
+        location: { room: document.getElementById("incLocation").value, floor: 2 },
+        description: document.getElementById("incDesc").value,
+        building_id: 1
+      };
+
+      try {
+        const res = await fetch("/api/incidents", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          resultEl.innerHTML = `
+            <div class="agent-card" style="border-left-color: var(--safe-green);">
+              <div class="agent-name" style="color: var(--safe-green);">✓ EMERGENCY REPORT TRANSMITTED</div>
+              <div class="agent-thought">
+                Incident ID: <strong>#${data.id}</strong><br>
+                Multi-Agent Analysis: <strong>${data.analysis ? data.analysis.status : "Complete"}</strong><br>
+                Safe Evacuation Exits: <strong>${(data.analysis?.evacuation_plan?.primary_safe_exits || []).join(", ") || "Determined"}</strong>
+              </div>
+              <div style="margin-top: 10px;">
+                <button class="btn-cyan" onclick="window.location.href='/'">Return to Command Center</button>
+              </div>
+            </div>
+          `;
+        } else {
+          resultEl.innerHTML = `<div class="agent-thought" style="color: var(--danger-red);">Failed to submit report. Status: ${res.status}</div>`;
+        }
+      } catch (err) {
+        resultEl.innerHTML = `<div class="agent-thought" style="color: var(--danger-red);">Network error: ${err.message}</div>`;
+      }
+    }
+  </script>
+</body>
+</html>

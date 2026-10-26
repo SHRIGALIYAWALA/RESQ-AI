@@ -8,6 +8,7 @@ class Building(Base):
     __tablename__ = "buildings"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String(100), nullable=False, default="demo", index=True)
     name = Column(String(255), nullable=False)
     address = Column(String(255), nullable=False)
     description = Column(Text, default="")
@@ -15,6 +16,8 @@ class Building(Base):
     digital_model_status = Column(String(50), default="draft")
     verification_status = Column(String(50), default="unverified")
     verification_notes = Column(Text, default="")
+    latitude = Column(Float, nullable=True)
+    longitude = Column(Float, nullable=True)
 
     floors = relationship("Floor", back_populates="building", cascade="all, delete-orphan")
     rooms = relationship("Room", back_populates="building", cascade="all, delete-orphan")
@@ -61,6 +64,22 @@ class Room(Base):
 
     building = relationship("Building", back_populates="rooms")
     floor = relationship("Floor", back_populates="rooms")
+
+
+class Occupant(Base):
+    __tablename__ = "occupants"
+
+    id = Column(Integer, primary_key=True, index=True)
+    building_id = Column(Integer, ForeignKey("buildings.id"), nullable=False)
+    name = Column(String(255), nullable=False)
+    room_name = Column(String(255), default="")
+    floor_number = Column(Integer, default=0)
+    status = Column(String(50), default="inside")
+    contact_channel = Column(String(100), default="local_display")
+    contact_value = Column(String(255), default="")
+    last_seen = Column(String(50), default="")
+
+    building = relationship("Building")
 
 
 class Corridor(Base):
@@ -178,6 +197,7 @@ class Camera(Base):
     location = Column(String(255), default="")
     zone = Column(String(255), default="")
     direction = Column(String(255), default="")
+    source = Column(String(1000), default="")
     status = Column(String(50), default="online")
     last_update = Column(String(100), default="")
 
@@ -233,6 +253,7 @@ class Incident(Base):
     __tablename__ = "incidents"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String(100), nullable=False, default="demo", index=True)
     building_id = Column(Integer, ForeignKey("buildings.id"), nullable=True)
     title = Column(String(255), nullable=False)
     incident_type = Column(String(100), nullable=False)
@@ -242,6 +263,11 @@ class Incident(Base):
     location_json = Column(Text, default="{}")
     summary = Column(Text, default="")
     analysis_json = Column(Text, default="{}")
+    review_status = Column(String(50), default="pending_review")
+    review_decision = Column(String(50), default="")
+    reviewed_by = Column(String(255), default="")
+    reviewed_at = Column(String(50), default="")
+    review_notes = Column(Text, default="")
     created_at = Column(String(50), default="")
 
     building = relationship("Building", back_populates="incidents")
@@ -253,6 +279,19 @@ class IncidentEvent(Base):
     id = Column(Integer, primary_key=True, index=True)
     incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=False)
     event_type = Column(String(100), nullable=False)
+    payload_json = Column(Text, default="{}")
+    created_at = Column(String(50), default="")
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(String(100), nullable=False, default="demo", index=True)
+    actor = Column(String(255), default="system")
+    action = Column(String(100), nullable=False)
+    entity_type = Column(String(100), nullable=False)
+    entity_id = Column(String(100), default="")
     payload_json = Column(Text, default="{}")
     created_at = Column(String(50), default="")
 
@@ -270,25 +309,30 @@ class OccupancyObservation(Base):
     created_at = Column(String(50), default="")
 
 
+class SensorReading(Base):
+    __tablename__ = "sensor_readings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    building_id = Column(Integer, ForeignKey("buildings.id"), nullable=False)
+    sensor_id = Column(Integer, ForeignKey("sensors.id"), nullable=True)
+    sensor_type = Column(String(100), default="generic")
+    value_json = Column(Text, default="{}")
+    source = Column(String(100), default="demo")
+    created_at = Column(String(50), default="")
+
+
 class Notification(Base):
     __tablename__ = "notifications"
 
     id = Column(Integer, primary_key=True, index=True)
-    incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=False)
-    audience = Column(String(100), nullable=False)
+    incident_id = Column(Integer, ForeignKey("incidents.id"), nullable=True)
+    audience = Column(String(100), nullable=False, default="occupants")
+    recipient_type = Column(String(100), default="occupant")
+    channel = Column(String(100), default="local_display")
+    address = Column(String(255), default="")
     message = Column(Text, nullable=False)
     status = Column(String(50), default="draft")
-    created_at = Column(String(50), default="")
-
-
-class Simulation(Base):
-    __tablename__ = "simulations"
-
-    id = Column(Integer, primary_key=True, index=True)
-    building_id = Column(Integer, ForeignKey("buildings.id"), nullable=True)
-    scenario_json = Column(Text, default="{}")
-    state_json = Column(Text, default="{}")
-    status = Column(String(50), default="created")
+    approved = Column(Boolean, default=False)
     created_at = Column(String(50), default="")
 
 
@@ -300,3 +344,13 @@ class IncidentReport(Base):
     report_json = Column(Text, default="{}")
     status = Column(String(50), default="draft")
     created_at = Column(String(50), default="")
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(String(255), unique=True, nullable=False, index=True)
+    password_hash = Column(Text, nullable=False)
+    tenant_id = Column(String(100), nullable=False, default="demo", index=True)
+    role = Column(String(50), default="viewer")

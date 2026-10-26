@@ -1,487 +1,257 @@
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 import json
+import logging
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Awaitable, Callable, Dict
 
-from fastapi import Depends, FastAPI, HTTPException, UploadFile, File
+from fastapi import Depends, FastAPI, HTTPException, UploadFile, File, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, PlainTextResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.orm import Session
+from sqlalchemy import text
 
-from backend.agents.multimodal_context_agent import MultimodalContextAgent
-from backend.agents.emergency_intelligence_core import EmergencyIntelligenceCore
-from backend.agents.planner_agent import PlannerAgent
-from backend.agents.triage_agent import TriageAgent
-from backend.agents.vision_agent import VisionAgent
 from backend.config import get_settings
-from backend.database.database import Base, engine, get_db, init_db
+from backend.database.database import get_db, init_db
 from backend.models.building import (
-    Building, Floor, Incident, IncidentEvent, IncidentReport, Notification,
-    OccupancyObservation, Resource, Route, Simulation,
+    AuditEvent, Building, Camera, Incident, IncidentEvent, IncidentReport, Notification, Occupant, User,
+    OccupancyObservation, Resource, Route, Sensor, SensorReading,
 )
-from backend.schemas.building import (
-    BuildingAnalysisInput,
-    BuildingCreate,
-    BuildingVerificationInput,
-)
-from backend.schemas.incident import IncidentCreate
-from backend.services.building_service import create_building, get_building_summary, get_building_floors
-from backend.services.building_graph import build_building_graph, evaluate_routes
+from backend.security.auth import decode_access_token
+from backend.vision.event_bus import vision_event_bus
+from backend.vision.stream_manager import stream_manager
+from backend.api.websocket import ws_manager
 
+# Import Modular API Routers
+from backend.api.auth import router as auth_router
+from backend.api.buildings import router as buildings_router
+from backend.api.cameras import router as cameras_router
+from backend.api.vision import router as vision_router
+from backend.api.incidents import router as incidents_router
+from backend.api.evacuation import router as evacuation_router
+from backend.api.announcements import router as announcements_router
+from backend.api.voice import router as voice_router
+from backend.api.resources import router as resources_router
+from backend.api.routes import router as routes_router
+from backend.api.knowledge import router as knowledge_router
+from backend.api.audit import router as audit_router
+from backend.api.media import router as media_router
+from backend.api.websocket import router as websocket_router
+from backend.security.rate_limit import check_rate_limit
+
+logger = logging.getLogger("resq_ai")
 settings = get_settings()
 
-# Ensure the SQLite schema exists even when tests or callers create a TestClient
-# without entering the FastAPI lifespan context manager.
+
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 init_db()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    # Start the real-time vision event bus: drains thread-produced vision
+    # telemetry (occupancy/hazards/camera status) into WebSocket broadcasts.
+    vision_event_bus.start(lambda event: ws_manager.broadcast(event))
     yield
+    vision_event_bus._drain_task = None
 
 
-app = FastAPI(title="RESQ-AI", version="0.1.0", lifespan=lifespan)
+app = FastAPI(
+    title="RESQ-AI",
+    description="Real-Time Multimodal Agentic Emergency Response, Building Intelligence & Safe Evacuation Platform",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+# Static Files
+Path("frontend/css").mkdir(parents=True, exist_ok=True)
+Path("frontend/js").mkdir(parents=True, exist_ok=True)
+Path("uploads").mkdir(parents=True, exist_ok=True)
+
+app.mount("/css", StaticFiles(directory="frontend/css"), name="frontend-css")
+app.mount("/js", StaticFiles(directory="frontend/js"), name="frontend-js")
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    try:
+        check_rate_limit(request)
+    except HTTPException as exc:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+    return await call_next(request)
+
+
+@app.middleware("http")
+async def optional_api_key(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    if settings.api_key and request.url.path.startswith("/api/") and request.method in {"POST", "PUT", "PATCH", "DELETE"}:
+        if request.headers.get("x-api-key") != settings.api_key:
+            return JSONResponse(status_code=401, content={"detail": "Valid X-API-Key required"})
+    if settings.require_auth and request.url.path.startswith("/api/") and not request.url.path.startswith("/api/auth/"):
+        authorization = request.headers.get("authorization", "")
+        if not authorization:
+            cookie_token = request.cookies.get("resq_access_token", "")
+            if cookie_token:
+                authorization = f"Bearer {cookie_token}"
+        if not authorization.startswith("Bearer "):
+            return JSONResponse(status_code=401, content={"detail": "Bearer token required"})
+        try:
+            request.state.identity = decode_access_token(authorization[7:], settings.auth_secret)
+        except Exception:
+            return JSONResponse(status_code=401, content={"detail": "Invalid or expired token"})
+    return await call_next(request)
+
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[item.strip() for item in settings.cors_origins.split(",") if item.strip()] or ["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# Register API Routers
+app.include_router(websocket_router)
+app.include_router(auth_router)
+app.include_router(buildings_router)
+app.include_router(cameras_router)
+app.include_router(vision_router)
+app.include_router(incidents_router)
+app.include_router(evacuation_router)
+app.include_router(announcements_router)
+app.include_router(voice_router)
+app.include_router(resources_router)
+app.include_router(routes_router)
+app.include_router(knowledge_router)
+app.include_router(audit_router)
+app.include_router(media_router)
 
+
+# Health and Status Endpoints
 @app.get("/health")
 def health_check():
     return {"status": "ok", "service": "resq-ai", "mode": settings.app_env}
 
 
-@app.get("/")
-def read_root():
+@app.get("/ready")
+def readiness_check(db: Session = Depends(get_db)) -> Any:
+    try:
+        db.execute(text("SELECT 1"))
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Database is unavailable") from exc
+    return {"status": "ready", "database": "ok", "database_backend": db.get_bind().dialect.name, "provider_mode": settings.llm_provider}
+
+
+@app.get("/api/health/providers")
+def provider_health() -> Any:
+    return {
+        "status": "ok",
+        "providers": {
+            "llm": settings.llm_provider,
+            "vision": settings.vision_provider,
+            "speech": settings.speech_provider,
+            "routing": settings.routing_provider,
+            "notifications": "websocket/audio-broadcast/local",
+        },
+        "human_review_required": True,
+    }
+
+
+@app.get("/api/status")
+def api_status():
     return {"message": "RESQ-AI backend is running", "tagline": "Sense. Understand. Coordinate. Respond."}
 
 
-@app.post("/api/buildings")
-def create_building_api(payload: BuildingCreate, db: Session = Depends(get_db)):
+@app.get("/metrics")
+def metrics_endpoint(db: Session = Depends(get_db)) -> Any:
+    """Lightweight operational metrics for monitoring hooks."""
     try:
-        building = create_building(db, payload.model_dump())
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
+        db.execute(text("SELECT 1"))
+        db_ok = True
+    except Exception:
+        db_ok = False
     return {
-        "id": building.id,
-        "name": building.name,
-        "address": building.address,
-        "description": building.description,
-        "floors": [{"id": f.id, "number": f.number, "name": f.name} for f in building.floors],
-        "rooms": [{"id": r.id, "name": r.name, "floor_number": r.floor_number} for r in building.rooms],
-        "routes": [{"id": route.id, "name": route.name, "origin": route.origin, "destination": route.destination} for route in building.routes],
-        "resources": [{"id": res.id, "name": res.name, "resource_type": res.resource_type, "status": res.status} for res in building.resources],
+        "service": "resq-ai",
+        "database_ok": db_ok,
+        "active_ws_connections": len(ws_manager.active_connections),
+        "vision_streams": len(stream_manager.get_all_streams()) if hasattr(stream_manager, "get_all_streams") else 0,
+        "mode": settings.app_env,
     }
 
 
-@app.get("/api/buildings/{building_id}")
-def get_building_api(building_id: int, db: Session = Depends(get_db)):
-    building = db.query(Building).filter(Building.id == building_id).first()
+# UI — redirect legacy HTML routes to Next.js command center
+def _frontend_redirect(path: str = "") -> RedirectResponse:
+    base = settings.frontend_url.rstrip("/")
+    return RedirectResponse(url=f"{base}{path}", status_code=307)
+
+
+@app.get("/")
+def read_root():
+    return _frontend_redirect("/")
+
+
+@app.get("/buildings")
+def read_buildings_page():
+    return _frontend_redirect("/buildings")
+
+
+@app.get("/incident")
+def read_incident_page():
+    return _frontend_redirect("/incident")
+
+
+@app.get("/dashboard")
+def read_dashboard_page():
+    return _frontend_redirect("/")
+
+
+@app.get("/frontend/dashboard")
+def frontend_dashboard():
+    return _frontend_redirect("/")
+
+
+@app.get("/frontend/index")
+def frontend_index():
+    return _frontend_redirect("/")
+
+
+@app.get("/legacy")
+def legacy_dashboard():
+    """Fallback legacy HTML dashboard if Next.js is unavailable."""
+    return FileResponse("frontend/index.html")
+
+
+# Helper Tenant & Audit Functions for backward compatibility
+def request_tenant(request: Request) -> str:
+    return str(getattr(request.state, "identity", {}).get("tenant_id", "demo"))
+
+
+def get_tenant_building(building_id: int, request: Request, db: Session) -> Building:
+    building = db.query(Building).filter(Building.id == building_id, Building.tenant_id == request_tenant(request)).first()
     if building is None:
         raise HTTPException(status_code=404, detail="Building not found")
-    return {
-        "id": building.id,
-        "name": building.name,
-        "address": building.address,
-        "description": building.description,
-        "floors": [{"id": f.id, "number": f.number, "name": f.name} for f in building.floors],
-        "rooms": [{"id": r.id, "name": r.name, "floor_number": r.floor_number, "zone": r.zone, "occupancy": r.occupancy} for r in building.rooms],
-        "routes": [{"id": route.id, "name": route.name, "origin": route.origin, "destination": route.destination, "status": route.status} for route in building.routes],
-        "resources": [{"id": res.id, "name": res.name, "resource_type": res.resource_type, "status": res.status, "location": res.location} for res in building.resources],
-    }
+    return building
 
 
-@app.get("/api/buildings/{building_id}/floors")
-def get_building_floors_api(building_id: int, db: Session = Depends(get_db)):
-    floors = get_building_floors(db, building_id)
-    return {"building_id": building_id, "floors": floors}
-
-
-@app.post("/api/buildings/{building_id}/analyze")
-def analyze_building_api(building_id: int, payload: BuildingAnalysisInput, db: Session = Depends(get_db)):
-    building = db.query(Building).filter(Building.id == building_id).first()
-    if building is None:
-        raise HTTPException(status_code=404, detail="Building not found")
-
-    building.digital_model_status = "analyzed"
-    building.verification_status = "pending_admin_review" if not payload.verified else "verified"
-    db.commit()
-
-    digital_model = get_building_summary(db, building_id)
-    return {
-        "building_id": building_id,
-        "status": "building_analysis_complete",
-        "source_type": payload.source_type,
-        "summary": payload.summary or "AI extracted building elements and flagged them for administrator review.",
-        "digital_model": digital_model,
-        "verified": payload.verified,
-    }
-
-
-@app.post("/api/buildings/{building_id}/verify")
-def verify_building_api(building_id: int, payload: BuildingVerificationInput, db: Session = Depends(get_db)):
-    building = db.query(Building).filter(Building.id == building_id).first()
-    if building is None:
-        raise HTTPException(status_code=404, detail="Building not found")
-
-    building.verification_status = "verified" if payload.verified else "rejected"
-    building.verification_notes = payload.notes
-    building.digital_model_status = "verified" if payload.verified else "draft"
-    db.commit()
-
-    return {
-        "building_id": building_id,
-        "verification_status": building.verification_status,
-        "reviewer": payload.reviewer,
-        "notes": payload.notes,
-        "digital_model_status": building.digital_model_status,
-    }
-
-
-@app.post("/api/buildings/{building_id}/vision")
-def building_vision_state(building_id: int, payload: Dict[str, Any], db: Session = Depends(get_db)):
-    building = db.query(Building).filter(Building.id == building_id).first()
-    if building is None:
-        raise HTTPException(status_code=404, detail="Building not found")
-
-    vision = VisionAgent().analyze(
-        camera_id=payload.get("camera_id", "unknown"),
-        observations=payload.get("observations", []),
-        floor=int(payload.get("floor", 0)),
-        zone=payload.get("zone", "unknown"),
-    )
-    return {
-        "building_id": building_id,
-        "live_environment_state": {
-            "building_id": building_id,
-            "camera_id": payload.get("camera_id", "unknown"),
-            "floor": payload.get("floor", 0),
-            "zone": payload.get("zone", "unknown"),
-            "people_detected": vision["people_detected"],
-            "hazards": vision["hazards"],
-            "confidence": vision["confidence"],
-            "source": "authorized camera observation",
-        },
-        "vision_agent": vision,
-    }
-
-
-@app.get("/api/buildings/{building_id}/graph")
-def building_graph_api(building_id: int, db: Session = Depends(get_db)):
-    try:
-        return build_building_graph(db, building_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="Building not found") from exc
-
-
-@app.post("/api/buildings/{building_id}/routes/evaluate")
-def evaluate_building_routes(building_id: int, payload: Dict[str, Any], db: Session = Depends(get_db)):
-    try:
-        return evaluate_routes(
-            db,
-            building_id,
-            [str(item) for item in payload.get("hazards", [])],
-            float(payload.get("max_risk", 1.0)),
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="Building not found") from exc
-
-
-@app.get("/api/buildings/{building_id}/resources")
-def building_resources_api(building_id: int, db: Session = Depends(get_db)):
-    building = db.query(Building).filter(Building.id == building_id).first()
-    if building is None:
-        raise HTTPException(status_code=404, detail="Building not found")
-    return [{"id": item.id, "name": item.name, "resource_type": item.resource_type, "status": item.status, "location": item.location} for item in building.resources]
-
-
-@app.post("/api/buildings/{building_id}/resources/{resource_id}/reserve")
-def reserve_resource_api(building_id: int, resource_id: int, db: Session = Depends(get_db)):
-    resource = db.query(Resource).filter(Resource.id == resource_id, Resource.building_id == building_id).first()
-    if resource is None:
-        raise HTTPException(status_code=404, detail="Resource not found")
-    if resource.status != "available":
-        raise HTTPException(status_code=409, detail="Resource is not available")
-    resource.status = "reserved"
-    db.commit()
-    return {"id": resource.id, "status": resource.status, "human_confirmation_required": True}
-
-
-@app.post("/api/incidents")
-def create_incident_api(payload: IncidentCreate, db: Session = Depends(get_db)):
-    if payload.building_id is not None and db.query(Building).filter(Building.id == payload.building_id).first() is None:
-        raise HTTPException(status_code=404, detail="Building not found")
-    incident = Incident(
-        title=payload.title,
-        incident_type=payload.incident_type,
-        description=payload.description,
-        building_id=payload.building_id,
-        status="open",
-        severity=payload.severity,
-        location_json=json.dumps(payload.location),
-        created_at=datetime.utcnow().isoformat(),
-    )
-    try:
-        db.add(incident)
-        db.commit()
-        db.refresh(incident)
-        db.add(IncidentEvent(
-            incident_id=incident.id,
-            event_type="incident_created",
-            payload_json=json.dumps({"title": incident.title, "incident_type": incident.incident_type}),
-            created_at=datetime.utcnow().isoformat(),
-        ))
-        db.commit()
-    except Exception as exc:
-        db.rollback()
-        raise HTTPException(status_code=400, detail="Unable to create incident") from exc
-
-    return {
-        "id": incident.id,
-        "title": incident.title,
-        "incident_type": incident.incident_type,
-        "description": incident.description,
-        "building_id": incident.building_id,
-        "status": incident.status,
-        "severity": incident.severity,
-        "location": payload.location,
-        "summary": "Incident created. Planner and triage agents are ready to evaluate.",
-    }
-
-
-@app.post("/api/incidents/{incident_id}/multimodal")
-def multimodal_incident_context(incident_id: int, payload: Dict[str, Any], db: Session = Depends(get_db)):
-    incident = db.query(Incident).filter(Incident.id == incident_id).first()
+def get_tenant_incident(incident_id: int, request: Request, db: Session) -> Incident:
+    incident = db.query(Incident).filter(Incident.id == incident_id, Incident.tenant_id == request_tenant(request)).first()
     if incident is None:
         raise HTTPException(status_code=404, detail="Incident not found")
-
-    incident_type = incident.incident_type or payload.get("incident_type", "unknown")
-    context = MultimodalContextAgent().build_context(incident_id, incident_type, payload)
-    incident.summary = "Multimodal incident context assembled. Human review required."
-    db.add(IncidentEvent(incident_id=incident_id, event_type="multimodal_context", payload_json=json.dumps(context), created_at=datetime.utcnow().isoformat()))
-    db.commit()
-    return {"incident_context": context}
-
-
-@app.post("/api/incidents/analyze")
-def analyze_incident(payload: IncidentCreate, db: Session = Depends(get_db)):
-    incident_data = payload.model_dump()
-    building = None
-    if payload.building_id is not None:
-        try:
-            building = get_building_summary(db, payload.building_id)
-        except ValueError as exc:
-            raise HTTPException(status_code=404, detail="Building not found") from exc
-
-    intelligence = EmergencyIntelligenceCore().analyze(incident_data, building)
-    summary = (
-        f"{payload.incident_type.upper()} incident at {payload.location.get('room', 'unknown room')} requires "
-        f"human review with triage and route evaluation."
-    )
-    return {
-        "incident_id": 0,
-        **intelligence,
-        "summary": summary,
-        "status": "analysis_complete",
-    }
-
-
-@app.post("/api/incidents/{incident_id}/intelligence")
-def analyze_existing_incident(incident_id: int, db: Session = Depends(get_db)):
-    incident = db.query(Incident).filter(Incident.id == incident_id).first()
-    if incident is None:
-        raise HTTPException(status_code=404, detail="Incident not found")
-
-    incident_data = {
-        "title": incident.title,
-        "incident_type": incident.incident_type,
-        "description": incident.description,
-        "building_id": incident.building_id,
-        "location": json.loads(incident.location_json or "{}"),
-        "severity": incident.severity,
-    }
-    building = None
-    if incident.building_id is not None:
-        building = get_building_summary(db, incident.building_id)
-    intelligence = EmergencyIntelligenceCore().analyze(incident_data, building)
-    incident.analysis_json = json.dumps(intelligence)
-    incident.summary = intelligence["report"]["executive_summary"]
-    db.add(IncidentEvent(incident_id=incident.id, event_type="intelligence_analysis", payload_json=json.dumps(intelligence), created_at=datetime.utcnow().isoformat()))
-    db.commit()
-    return {"incident_id": incident.id, "analysis": intelligence, "status": "analysis_persisted"}
-
-
-@app.get("/api/incidents/{incident_id}")
-def get_incident_api(incident_id: int, db: Session = Depends(get_db)):
-    incident = db.query(Incident).filter(Incident.id == incident_id).first()
-    if incident is None:
-        raise HTTPException(status_code=404, detail="Incident not found")
-    return {
-        "id": incident.id,
-        "building_id": incident.building_id,
-        "title": incident.title,
-        "incident_type": incident.incident_type,
-        "description": incident.description,
-        "status": incident.status,
-        "severity": incident.severity,
-        "location": json.loads(incident.location_json or "{}"),
-        "summary": incident.summary or "Incident tracked for response review.",
-    }
-
-
-@app.get("/api/incidents/{incident_id}/timeline")
-def incident_timeline(incident_id: int, db: Session = Depends(get_db)):
-    if db.query(Incident).filter(Incident.id == incident_id).first() is None:
-        raise HTTPException(status_code=404, detail="Incident not found")
-    events = db.query(IncidentEvent).filter(IncidentEvent.incident_id == incident_id).order_by(IncidentEvent.id).all()
-    return [{"id": event.id, "type": event.event_type, "payload": json.loads(event.payload_json or "{}"), "created_at": event.created_at} for event in events]
-
-
-@app.post("/api/buildings/{building_id}/occupancy-observations")
-def add_occupancy_observation(building_id: int, payload: Dict[str, Any], db: Session = Depends(get_db)):
-    if db.query(Building).filter(Building.id == building_id).first() is None:
-        raise HTTPException(status_code=404, detail="Building not found")
-    observation = OccupancyObservation(
-        building_id=building_id, floor_number=int(payload.get("floor_number", 0)),
-        zone=str(payload.get("zone", "")), people_count=max(0, int(payload.get("people_count", 0))),
-        source=str(payload.get("source", "manual")), confidence=float(payload.get("confidence", 0.5)),
-        created_at=datetime.utcnow().isoformat(),
-    )
-    db.add(observation)
-    db.commit()
-    db.refresh(observation)
-    return {"id": observation.id, "building_id": building_id, "floor_number": observation.floor_number, "zone": observation.zone, "people_count": observation.people_count, "confidence": observation.confidence}
-
-
-@app.get("/api/buildings/{building_id}/occupancy-heatmap")
-def occupancy_heatmap(building_id: int, db: Session = Depends(get_db)):
-    if db.query(Building).filter(Building.id == building_id).first() is None:
-        raise HTTPException(status_code=404, detail="Building not found")
-    observations = db.query(OccupancyObservation).filter(OccupancyObservation.building_id == building_id).order_by(OccupancyObservation.id).all()
-    return {"building_id": building_id, "live": True, "observations": [{"floor_number": item.floor_number, "zone": item.zone, "people_count": item.people_count, "confidence": item.confidence, "source": item.source} for item in observations]}
-
-
-@app.post("/api/incidents/{incident_id}/notifications")
-def create_notification(incident_id: int, payload: Dict[str, Any], db: Session = Depends(get_db)):
-    if db.query(Incident).filter(Incident.id == incident_id).first() is None:
-        raise HTTPException(status_code=404, detail="Incident not found")
-    notification = Notification(incident_id=incident_id, audience=str(payload.get("audience", "authorized responders")), message=str(payload.get("message", "")), status="draft", created_at=datetime.utcnow().isoformat())
-    db.add(notification)
-    db.commit()
-    db.refresh(notification)
-    return {"id": notification.id, "incident_id": incident_id, "audience": notification.audience, "message": notification.message, "status": notification.status, "human_approval_required": True}
-
-
-@app.get("/api/incidents/{incident_id}/events")
-def incident_notifications(incident_id: int, db: Session = Depends(get_db)):
-    if db.query(Incident).filter(Incident.id == incident_id).first() is None:
-        raise HTTPException(status_code=404, detail="Incident not found")
-    return [{"id": item.id, "audience": item.audience, "message": item.message, "status": item.status, "created_at": item.created_at} for item in db.query(Notification).filter(Notification.incident_id == incident_id).all()]
-
-
-@app.post("/api/simulations")
-def create_simulation(payload: Dict[str, Any], db: Session = Depends(get_db)):
-    building_id = payload.get("building_id")
-    if building_id is not None and db.query(Building).filter(Building.id == building_id).first() is None:
-        raise HTTPException(status_code=404, detail="Building not found")
-    simulation = Simulation(building_id=building_id, scenario_json=json.dumps(payload), state_json=json.dumps({"step": 0, "hazards": payload.get("hazards", []), "human_review_required": True}), created_at=datetime.utcnow().isoformat())
-    db.add(simulation)
-    db.commit()
-    db.refresh(simulation)
-    return {"id": simulation.id, "status": simulation.status, "simulated": True, "human_review_required": True}
-
-
-@app.post("/api/simulations/{simulation_id}/steps")
-def advance_simulation(simulation_id: int, payload: Dict[str, Any], db: Session = Depends(get_db)):
-    simulation = db.query(Simulation).filter(Simulation.id == simulation_id).first()
-    if simulation is None:
-        raise HTTPException(status_code=404, detail="Simulation not found")
-    state = json.loads(simulation.state_json or "{}")
-    state["step"] = int(state.get("step", 0)) + 1
-    state["last_action"] = payload.get("action", "observe")
-    simulation.state_json = json.dumps(state)
-    simulation.status = "step_complete"
-    db.commit()
-    return {"id": simulation.id, "status": simulation.status, "state": state, "simulated": True, "human_review_required": True}
-
-
-@app.get("/api/simulations/{simulation_id}")
-def get_simulation(simulation_id: int, db: Session = Depends(get_db)):
-    simulation = db.query(Simulation).filter(Simulation.id == simulation_id).first()
-    if simulation is None:
-        raise HTTPException(status_code=404, detail="Simulation not found")
-    return {"id": simulation.id, "building_id": simulation.building_id, "scenario": json.loads(simulation.scenario_json or "{}"), "state": json.loads(simulation.state_json or "{}"), "status": simulation.status, "simulated": True}
-
-
-@app.post("/api/incidents/{incident_id}/reports")
-def create_incident_report(incident_id: int, db: Session = Depends(get_db)):
-    incident = db.query(Incident).filter(Incident.id == incident_id).first()
-    if incident is None:
-        raise HTTPException(status_code=404, detail="Incident not found")
-    report = {"title": f"Incident report: {incident.title}", "incident_type": incident.incident_type, "summary": incident.summary, "limitations": ["Draft for human review", "No autonomous dispatch"]}
-    record = IncidentReport(incident_id=incident_id, report_json=json.dumps(report), created_at=datetime.utcnow().isoformat())
-    db.add(record)
-    db.commit()
-    db.refresh(record)
-    return {"id": record.id, "incident_id": incident_id, "report": report, "status": record.status, "exportable": False}
-
-
-@app.get("/api/buildings")
-def list_buildings(db: Session = Depends(get_db)):
-    buildings = db.query(Building).all()
-    return [{"id": b.id, "name": b.name, "address": b.address, "status": "ready"} for b in buildings]
-
-
-@app.get("/api/incidents")
-def list_incidents(db: Session = Depends(get_db)):
-    incidents = db.query(Incident).all()
-    return [{"id": i.id, "title": i.title, "incident_type": i.incident_type, "status": i.status, "severity": i.severity} for i in incidents]
-
-
-@app.post("/api/incidents/{incident_id}/voice")
-def voice_input_endpoint(incident_id: int, text: str = "", db: Session = Depends(get_db)):
-    incident = db.query(Incident).filter(Incident.id == incident_id).first()
-    if not incident:
-        raise HTTPException(status_code=404, detail="Incident not found")
-    incident.summary = f"Voice transcript added: {text or 'No transcript supplied'}"
-    db.commit()
-    return {"status": "voice_record_received", "incident_id": incident_id, "summary": incident.summary}
-
-
-@app.post("/api/incidents/{incident_id}/image")
-def image_input_endpoint(incident_id: int, file: UploadFile = File(...), db: Session = Depends(get_db)):
-    incident = db.query(Incident).filter(Incident.id == incident_id).first()
-    if not incident:
-        raise HTTPException(status_code=404, detail="Incident not found")
-    upload_dir = Path(settings.upload_dir)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    content = file.file.read()
-    if len(content) > settings.max_file_size_mb * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File exceeds maximum size")
-    file_extension = Path(file.filename or "").suffix.lower()
-    allowed = {".png", ".jpg", ".jpeg"}
-    if file_extension not in allowed:
-        raise HTTPException(status_code=400, detail="Unsupported file type")
-    storage_path = upload_dir / f"incident_{incident_id}{file_extension}"
-    storage_path.write_bytes(content)
-    incident.summary = f"Image uploaded to {storage_path.name}. AI inspection is simulated in this demo mode."
-    db.commit()
-    return {"status": "image_received", "incident_id": incident_id, "path": str(storage_path), "summary": incident.summary}
+    return incident
 
 
 @app.get("/api/dashboard")
-def dashboard_data(db: Session = Depends(get_db)):
-    buildings = db.query(Building).all()
-    incidents = db.query(Incident).all()
-    resources = db.query(Resource).all()
-    routes = db.query(Route).all()
+def dashboard_data(request: Request, db: Session = Depends(get_db)) -> Any:
+    tenant_id = request_tenant(request)
+    buildings = db.query(Building).filter(Building.tenant_id == tenant_id).all()
+    incidents = db.query(Incident).filter(Incident.tenant_id == tenant_id).all()
+    building_ids = [building.id for building in buildings]
+    resources = db.query(Resource).filter(Resource.building_id.in_(building_ids)).all() if building_ids else []
+    routes = db.query(Route).filter(Route.building_id.in_(building_ids)).all() if building_ids else []
     return {
         "system_status": "online",
         "active_incidents": len(incidents),
@@ -493,11 +263,81 @@ def dashboard_data(db: Session = Depends(get_db)):
     }
 
 
-@app.get("/frontend/dashboard")
-def frontend_dashboard():
-    return FileResponse("frontend/dashboard.html")
+# Backward-compatible incident reports & export endpoints
+@app.post("/api/incidents/{incident_id}/reports")
+def create_incident_report(incident_id: int, request: Request, db: Session = Depends(get_db)) -> Any:
+    incident = db.query(Incident).filter(Incident.id == incident_id).first()
+    if incident is None or incident.tenant_id != request_tenant(request):
+        raise HTTPException(status_code=404, detail="Incident not found")
+    report = {"title": f"Incident report: {incident.title}", "incident_type": incident.incident_type, "summary": incident.summary, "limitations": ["Draft for human review", "No autonomous dispatch"]}
+    record = IncidentReport(incident_id=incident_id, report_json=json.dumps(report), created_at=utc_now_iso())
+    db.add(record)
+    db.commit()
+    db.refresh(record)
+    return {"id": record.id, "incident_id": incident_id, "report": report, "status": record.status, "exportable": True}
 
 
-@app.get("/frontend/index")
-def frontend_index():
-    return FileResponse("frontend/index.html")
+@app.get("/api/incidents/{incident_id}/reports/{report_id}")
+def get_incident_report(incident_id: int, report_id: int, request: Request, db: Session = Depends(get_db)) -> Any:
+    incident = db.query(Incident).filter(Incident.id == incident_id).first()
+    if incident is None or incident.tenant_id != request_tenant(request):
+        raise HTTPException(status_code=404, detail="Incident not found")
+    record = db.query(IncidentReport).filter(IncidentReport.id == report_id, IncidentReport.incident_id == incident_id).first()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    return {"id": record.id, "incident_id": incident_id, "report": json.loads(record.report_json or "{}"), "status": record.status, "exportable": True}
+
+
+@app.get("/api/incidents/{incident_id}/reports/{report_id}/export", response_class=PlainTextResponse)
+def export_incident_report(incident_id: int, report_id: int, request: Request, db: Session = Depends(get_db)):
+    incident = db.query(Incident).filter(Incident.id == incident_id).first()
+    if incident is None or incident.tenant_id != request_tenant(request):
+        raise HTTPException(status_code=404, detail="Incident not found")
+    record = db.query(IncidentReport).filter(IncidentReport.id == report_id, IncidentReport.incident_id == incident_id).first()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    report = json.loads(record.report_json or "{}")
+    lines = [report.get("title", "Incident report"), "", f"Type: {report.get('incident_type', 'unknown')}", f"Summary: {report.get('summary', '')}", "", "Limitations:"]
+    lines.extend(f"- {item}" for item in report.get("limitations", []))
+    return "\n".join(lines)
+
+
+def _pdf_escape(value: str) -> str:
+    return value.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+@app.get("/api/incidents/{incident_id}/reports/{report_id}/export.pdf")
+def export_incident_report_pdf(incident_id: int, report_id: int, request: Request, db: Session = Depends(get_db)):
+    incident = db.query(Incident).filter(Incident.id == incident_id).first()
+    if incident is None or incident.tenant_id != request_tenant(request):
+        raise HTTPException(status_code=404, detail="Incident not found")
+    record = db.query(IncidentReport).filter(IncidentReport.id == report_id, IncidentReport.incident_id == incident_id).first()
+    if record is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    report = json.loads(record.report_json or "{}")
+    text_lines = [report.get("title", "Incident report"), f"Type: {report.get('incident_type', 'unknown')}", f"Summary: {report.get('summary', '')}"]
+    text_lines.extend(f"Limitation: {item}" for item in report.get("limitations", []))
+    commands = ["BT", "/F1 12 Tf", "50 750 Td"]
+    for index, line in enumerate(text_lines):
+        if index:
+            commands.append("0 -18 Td")
+        commands.append(f"({_pdf_escape(line[:180])}) Tj")
+    commands.append("ET")
+    stream = "\n".join(commands).encode("latin-1", "replace")
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    ]
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for number, obj in enumerate(objects, 1):
+        offsets.append(len(pdf))
+        pdf.extend(f"{number} 0 obj\n".encode() + obj + b"\nendobj\n")
+    xref = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode())
+    pdf.extend(b"".join(f"{offset:010d} 00000 n \n".encode() for offset in offsets[1:]))
+    pdf.extend(f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF".encode())
+    return Response(bytes(pdf), media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename=incident_{incident_id}_report.pdf"})
